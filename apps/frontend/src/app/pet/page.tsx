@@ -1,13 +1,16 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
 import { usePetState } from '@/hooks/usePetState';
 import { PetSprite } from '@/components/PetSprite';
+import type { ActiveAction } from '@/components/PetSprite';
 import { StatBar } from '@/components/StatBar';
 import { ActionButtons } from '@/components/ActionButtons';
 import { VibeChatBox } from '@/components/VibeChatBox';
+
+const ACTION_ANIMATION_DURATION = 2500; // ms
 
 const statColors: Record<string, string> = {
   hunger: '#f59e0b',
@@ -22,12 +25,35 @@ export default function LivingRoomPage() {
   const pet = usePetState((s) => s.pet);
   const error = usePetState((s) => s.error);
   const { feed, play, sleep, wakeUp, clean, heal } = useSocket();
+  const [activeAction, setActiveAction] = useState<ActiveAction>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!pet) {
       router.push('/');
     }
   }, [pet, router]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const triggerAction = useCallback((action: ActiveAction, handler: () => void) => {
+    handler();
+    setActiveAction(action);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      setActiveAction(null);
+      timerRef.current = null;
+    }, ACTION_ANIMATION_DURATION);
+  }, []);
+
+  const handleFeed = useCallback(() => triggerAction('feed', feed), [triggerAction, feed]);
+  const handlePlay = useCallback(() => triggerAction('play', play), [triggerAction, play]);
+  const handleClean = useCallback(() => triggerAction('clean', clean), [triggerAction, clean]);
 
   if (!pet) return null;
 
@@ -43,7 +69,14 @@ export default function LivingRoomPage() {
 
       {/* Pet Sprite */}
       <div className="flex-1 flex items-center justify-center py-8">
-        <PetSprite petId={pet.id} state={pet.currentState} name={pet.name} level={pet.level} />
+        <PetSprite
+          petId={pet.id}
+          state={pet.currentState}
+          name={pet.name}
+          level={pet.level}
+          stats={pet.stats}
+          activeAction={activeAction}
+        />
       </div>
 
       {/* Vibe Chat */}
@@ -59,11 +92,11 @@ export default function LivingRoomPage() {
       {/* Action Buttons */}
       <ActionButtons
         currentState={pet.currentState}
-        onFeed={feed}
-        onPlay={play}
+        onFeed={handleFeed}
+        onPlay={handlePlay}
         onSleep={sleep}
         onWakeUp={wakeUp}
-        onClean={clean}
+        onClean={handleClean}
         onHeal={heal}
       />
 

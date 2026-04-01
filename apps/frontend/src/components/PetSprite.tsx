@@ -2,7 +2,8 @@
 
 import { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import type { PetState } from '@neogochi/shared';
+import type { TargetAndTransition } from 'framer-motion';
+import type { PetState, PetStats } from '@neogochi/shared';
 import {
   deriveTraits,
   primaryColor,
@@ -12,53 +13,94 @@ import {
 } from '@neogochi/shared';
 import type { PetTraits } from '@neogochi/shared';
 
+export type ActiveAction = 'feed' | 'play' | 'clean' | null;
+
 interface PetSpriteProps {
   petId: string;
   state: PetState;
   name: string;
   level: number;
+  stats?: PetStats;
+  activeAction?: ActiveAction;
+}
+
+// ─── Action to display state mapping ────────────────────────────
+
+function actionToDisplayState(action: ActiveAction): PetState | null {
+  switch (action) {
+    case 'feed':
+      return 'Eating';
+    case 'play':
+      return 'Playing';
+    case 'clean':
+      return null; // Clean has its own animation, not a PetState
+    default:
+      return null;
+  }
 }
 
 // ─── State-based animations ─────────────────────────────────────
 
-function getStateAnimation(state: PetState, traits: PetTraits): object {
+function getStateAnimation(
+  state: PetState,
+  traits: PetTraits,
+  activeAction?: ActiveAction,
+): TargetAndTransition {
   const speed = traits.bounceSpeed;
   const amp = traits.idleAmplitude;
 
-  switch (state) {
+  // Active action overrides state for animation
+  const displayState = activeAction ? actionToDisplayState(activeAction) : null;
+  const effectiveState = displayState ?? state;
+
+  // Clean action has its own unique animation (not a PetState)
+  if (activeAction === 'clean') {
+    return {
+      scale: [1, 1.04, 0.98, 1.02, 1],
+      rotate: [0, -3, 3, -2, 0],
+      transition: { repeat: Infinity, duration: 0.7 / speed, ease: 'easeInOut' },
+    };
+  }
+
+  switch (effectiveState) {
     case 'Idle':
       return {
-        y: [0, -4 * amp, 0],
-        transition: { repeat: Infinity, duration: 2 / speed, ease: 'easeInOut' },
+        y: [0, -6 * amp, 0],
+        transition: { repeat: Infinity, duration: 2.2 / speed, ease: 'easeInOut' },
       };
     case 'Eating':
       return {
-        scale: [1, 1.06, 1],
-        transition: { repeat: Infinity, duration: 0.5 / speed },
+        scale: [1, 1.08, 0.96, 1.04, 1],
+        y: [0, 2, -1, 1, 0],
+        transition: { repeat: Infinity, duration: 0.6 / speed, ease: 'easeInOut' },
       };
     case 'Playing':
       return {
-        rotate: [-6 * amp, 6 * amp, -6 * amp],
-        transition: { repeat: Infinity, duration: 0.3 / speed },
+        rotate: [-8 * amp, 8 * amp, -8 * amp],
+        y: [0, -12 * amp, 0, -8 * amp, 0],
+        scale: [1, 1.05, 1, 1.03, 1],
+        transition: { repeat: Infinity, duration: 0.5 / speed, ease: 'easeInOut' },
       };
     case 'Sleeping':
       return {
-        opacity: [1, 0.65, 1],
+        y: [0, 2, 0],
+        scale: [1, 1.02, 1],
         transition: { repeat: Infinity, duration: 3 / speed, ease: 'easeInOut' },
       };
     case 'Sick':
       return {
-        x: [-2, 2, -2],
-        transition: { repeat: Infinity, duration: 0.2 },
+        x: [-3, 3, -2, 2, -1, 0],
+        rotate: [-2, 2, -1, 1, 0],
+        transition: { repeat: Infinity, duration: 0.8, ease: 'easeInOut' },
       };
     case 'Evolution':
       return {
-        scale: [1, 1.3, 1],
-        rotate: [0, 360],
-        transition: { duration: 1 },
+        scale: [1, 1.1, 0.9, 1.3, 1],
+        rotate: [0, 90, 180, 270, 360],
+        transition: { duration: 1.5, ease: 'easeInOut' },
       };
     case 'Dead':
-      return { opacity: 0.3, rotate: 90 };
+      return { opacity: 0.3, rotate: 90, y: 10 };
     default:
       return {};
   }
@@ -85,7 +127,7 @@ function bodyPath(shape: PetTraits['bodyShape']): string {
 
 // ─── SVG Eye Renderers ──────────────────────────────────────────
 
-function renderEyes(traits: PetTraits, state: PetState): JSX.Element {
+function renderEyes(traits: PetTraits, state: PetState, stats?: PetStats): JSX.Element {
   const spacing = 12 * traits.eyeSpacing;
   const size = 5 * traits.eyeSize;
   const cx1 = 50 - spacing;
@@ -131,6 +173,101 @@ function renderEyes(traits: PetTraits, state: PetState): JSX.Element {
     );
   }
 
+  // Drowsy half-closed eyelids when energy is low
+  const tired = stats && stats.energy < 30;
+  // Sad droopy eyes when happiness is low
+  const sad = stats && stats.happiness < 30;
+
+  const eyeElements = renderEyeShape(traits, cx1, cx2, cy, size, color);
+
+  return (
+    <g>
+      {/* Eyes with blinking in idle/playing states */}
+      <g className={state === 'Idle' || state === 'Playing' ? 'pet-blink' : ''}>{eyeElements}</g>
+
+      {/* Drowsy eyelids for low energy */}
+      {tired && state !== 'Sick' && (
+        <g className="drowsy-lids">
+          <rect
+            x={cx1 - size - 1}
+            y={cy - size - 1}
+            width={(size + 1) * 2}
+            height={size * 1.2}
+            fill={primaryColor(traits)}
+            rx="2"
+          >
+            <animate
+              attributeName="height"
+              values={`${size * 0.6};${size * 1.0};${size * 0.6}`}
+              dur="2.5s"
+              repeatCount="indefinite"
+            />
+          </rect>
+          <rect
+            x={cx2 - size - 1}
+            y={cy - size - 1}
+            width={(size + 1) * 2}
+            height={size * 1.2}
+            fill={primaryColor(traits)}
+            rx="2"
+          >
+            <animate
+              attributeName="height"
+              values={`${size * 0.6};${size * 1.0};${size * 0.6}`}
+              dur="2.5s"
+              repeatCount="indefinite"
+            />
+          </rect>
+        </g>
+      )}
+
+      {/* Sad tear drops */}
+      {sad && (
+        <g>
+          <ellipse cx={cx1 + size * 0.3} cy={cy + size + 2} rx="1.5" ry="2" fill="#5bc0eb">
+            <animate
+              attributeName="cy"
+              values={`${cy + size + 2};${cy + size + 12};${cy + size + 2}`}
+              dur="1.8s"
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="opacity"
+              values="0.8;0;0.8"
+              dur="1.8s"
+              repeatCount="indefinite"
+            />
+          </ellipse>
+          <ellipse cx={cx2 + size * 0.3} cy={cy + size + 2} rx="1.5" ry="2" fill="#5bc0eb">
+            <animate
+              attributeName="cy"
+              values={`${cy + size + 2};${cy + size + 12};${cy + size + 2}`}
+              dur="2.2s"
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="opacity"
+              values="0.8;0;0.8"
+              dur="2.2s"
+              repeatCount="indefinite"
+            />
+          </ellipse>
+        </g>
+      )}
+    </g>
+  );
+}
+
+// ─── Eye shape renderer (extracted for blink wrapping) ──────────
+
+function renderEyeShape(
+  traits: PetTraits,
+  cx1: number,
+  cx2: number,
+  cy: number,
+  size: number,
+  color: string,
+): JSX.Element {
   switch (traits.eyeShape) {
     case 'round':
       return (
@@ -398,44 +535,350 @@ function renderAccessory(traits: PetTraits, level: number): JSX.Element {
   }
 }
 
-// ─── Sleeping ZZZ ───────────────────────────────────────────────
+// ─── Action Overlay Effects ─────────────────────────────────────
 
-function renderStateOverlay(state: PetState): JSX.Element {
+function renderActionOverlay(actionState: 'Eating' | 'Playing'): JSX.Element {
+  if (actionState === 'Eating') {
+    return (
+      <g>
+        {/* Food particles flying out */}
+        <circle cx="40" cy="56" r="1.5" fill="#f59e0b">
+          <animate attributeName="cx" values="40;28;20" dur="0.8s" repeatCount="indefinite" />
+          <animate attributeName="cy" values="56;48;44" dur="0.8s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="1;0.5;0" dur="0.8s" repeatCount="indefinite" />
+        </circle>
+        <circle cx="60" cy="56" r="1.2" fill="#f59e0b">
+          <animate attributeName="cx" values="60;72;80" dur="0.7s" repeatCount="indefinite" />
+          <animate attributeName="cy" values="56;50;46" dur="0.7s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="1;0.5;0" dur="0.7s" repeatCount="indefinite" />
+        </circle>
+        <circle cx="50" cy="54" r="1" fill="#fbbf24">
+          <animate attributeName="cy" values="54;42;36" dur="0.9s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.8;0.3;0" dur="0.9s" repeatCount="indefinite" />
+        </circle>
+      </g>
+    );
+  }
+  // Playing
+  return (
+    <g>
+      {/* Sparkle stars */}
+      <text x="8" y="20" fontSize="8">
+        ⭐
+        <animate attributeName="opacity" values="0;1;0" dur="1.2s" repeatCount="indefinite" />
+      </text>
+      <text x="82" y="30" fontSize="6">
+        ✨
+        <animate attributeName="opacity" values="0;1;0" dur="0.9s" repeatCount="indefinite" />
+      </text>
+      <text x="15" y="75" fontSize="7">
+        ✨
+        <animate attributeName="opacity" values="0;1;0" dur="1.5s" repeatCount="indefinite" />
+      </text>
+      <text x="78" y="80" fontSize="5">
+        ⭐
+        <animate attributeName="opacity" values="0;1;0" dur="1.1s" repeatCount="indefinite" />
+      </text>
+      {/* Motion lines */}
+      <line x1="10" y1="45" x2="5" y2="45" stroke="#888" strokeWidth="1" strokeLinecap="round">
+        <animate attributeName="opacity" values="0;0.5;0" dur="0.4s" repeatCount="indefinite" />
+      </line>
+      <line x1="90" y1="50" x2="95" y2="50" stroke="#888" strokeWidth="1" strokeLinecap="round">
+        <animate attributeName="opacity" values="0;0.5;0" dur="0.5s" repeatCount="indefinite" />
+      </line>
+    </g>
+  );
+}
+
+function renderCleanOverlay(): JSX.Element {
+  return (
+    <g>
+      {/* Rising soap bubbles */}
+      <circle cx="30" cy="70" r="3" fill="none" stroke="#06b6d4" strokeWidth="0.5" opacity="0.6">
+        <animate attributeName="cy" values="70;20;70" dur="2s" repeatCount="indefinite" />
+        <animate attributeName="opacity" values="0.6;0;0.6" dur="2s" repeatCount="indefinite" />
+        <animate attributeName="r" values="3;5;3" dur="2s" repeatCount="indefinite" />
+      </circle>
+      <circle cx="55" cy="75" r="2.5" fill="none" stroke="#06b6d4" strokeWidth="0.5" opacity="0.5">
+        <animate attributeName="cy" values="75;15;75" dur="2.4s" repeatCount="indefinite" />
+        <animate attributeName="opacity" values="0.5;0;0.5" dur="2.4s" repeatCount="indefinite" />
+        <animate attributeName="r" values="2.5;4;2.5" dur="2.4s" repeatCount="indefinite" />
+      </circle>
+      <circle cx="70" cy="65" r="2" fill="none" stroke="#38bdf8" strokeWidth="0.5" opacity="0.4">
+        <animate attributeName="cy" values="65;10;65" dur="1.8s" repeatCount="indefinite" />
+        <animate attributeName="opacity" values="0.4;0;0.4" dur="1.8s" repeatCount="indefinite" />
+        <animate attributeName="r" values="2;3.5;2" dur="1.8s" repeatCount="indefinite" />
+      </circle>
+      <circle cx="42" cy="80" r="2" fill="none" stroke="#22d3ee" strokeWidth="0.5" opacity="0.5">
+        <animate attributeName="cy" values="80;25;80" dur="2.6s" repeatCount="indefinite" />
+        <animate attributeName="opacity" values="0.5;0;0.5" dur="2.6s" repeatCount="indefinite" />
+        <animate attributeName="r" values="2;4.5;2" dur="2.6s" repeatCount="indefinite" />
+      </circle>
+      {/* Sparkle shimmer */}
+      <text x="20" y="35" fontSize="8">
+        ✨
+        <animate attributeName="opacity" values="0;0.8;0" dur="1s" repeatCount="indefinite" />
+      </text>
+      <text x="72" y="55" fontSize="6">
+        ✨
+        <animate attributeName="opacity" values="0;0.7;0" dur="1.3s" repeatCount="indefinite" />
+      </text>
+    </g>
+  );
+}
+
+// ─── State Overlay Effects ──────────────────────────────────────
+
+function renderStateOverlay(state: PetState, activeAction?: ActiveAction): JSX.Element {
+  // Active action overlays take priority
+  if (activeAction === 'feed') {
+    return renderActionOverlay('Eating');
+  }
+  if (activeAction === 'play') {
+    return renderActionOverlay('Playing');
+  }
+  if (activeAction === 'clean') {
+    return renderCleanOverlay();
+  }
+
   switch (state) {
     case 'Sleeping':
       return (
-        <g className="sleeping-zzz" fill="none" stroke="#a0a0c0" strokeWidth="1">
-          <text x="72" y="20" fontSize="8" fill="#a0a0c0" opacity="0.6">
+        <g>
+          {/* Floating ZZZs with staggered animation */}
+          <text x="72" y="20" fontSize="8" fill="#a0a0c0">
             z
+            <animate attributeName="y" values="20;10;20" dur="2.5s" repeatCount="indefinite" />
+            <animate
+              attributeName="opacity"
+              values="0.7;0.1;0.7"
+              dur="2.5s"
+              repeatCount="indefinite"
+            />
           </text>
-          <text x="78" y="12" fontSize="10" fill="#a0a0c0" opacity="0.4">
+          <text x="80" y="14" fontSize="11" fill="#a0a0c0">
             z
+            <animate attributeName="y" values="14;2;14" dur="3s" repeatCount="indefinite" />
+            <animate
+              attributeName="opacity"
+              values="0.5;0.05;0.5"
+              dur="3s"
+              repeatCount="indefinite"
+            />
           </text>
-          <text x="85" y="5" fontSize="12" fill="#a0a0c0" opacity="0.2">
+          <text x="87" y="8" fontSize="14" fill="#a0a0c0">
             z
+            <animate attributeName="y" values="8;-6;8" dur="3.5s" repeatCount="indefinite" />
+            <animate
+              attributeName="opacity"
+              values="0.3;0.02;0.3"
+              dur="3.5s"
+              repeatCount="indefinite"
+            />
           </text>
+          {/* Moon */}
+          <circle cx="88" cy="-5" r="5" fill="#f0e68c" opacity="0.3">
+            <animate
+              attributeName="opacity"
+              values="0.2;0.4;0.2"
+              dur="4s"
+              repeatCount="indefinite"
+            />
+          </circle>
+        </g>
+      );
+    case 'Eating':
+      return (
+        <g>
+          {/* Food particles flying out */}
+          <circle cx="40" cy="56" r="1.5" fill="#f59e0b">
+            <animate attributeName="cx" values="40;28;20" dur="0.8s" repeatCount="indefinite" />
+            <animate attributeName="cy" values="56;48;44" dur="0.8s" repeatCount="indefinite" />
+            <animate attributeName="opacity" values="1;0.5;0" dur="0.8s" repeatCount="indefinite" />
+          </circle>
+          <circle cx="60" cy="56" r="1.2" fill="#f59e0b">
+            <animate attributeName="cx" values="60;72;80" dur="0.7s" repeatCount="indefinite" />
+            <animate attributeName="cy" values="56;50;46" dur="0.7s" repeatCount="indefinite" />
+            <animate attributeName="opacity" values="1;0.5;0" dur="0.7s" repeatCount="indefinite" />
+          </circle>
+          <circle cx="50" cy="54" r="1" fill="#fbbf24">
+            <animate attributeName="cy" values="54;42;36" dur="0.9s" repeatCount="indefinite" />
+            <animate
+              attributeName="opacity"
+              values="0.8;0.3;0"
+              dur="0.9s"
+              repeatCount="indefinite"
+            />
+          </circle>
+        </g>
+      );
+    case 'Playing':
+      return (
+        <g>
+          {/* Sparkle stars around the pet */}
+          <text x="8" y="20" fontSize="8">
+            ⭐
+            <animate attributeName="opacity" values="0;1;0" dur="1.2s" repeatCount="indefinite" />
+          </text>
+          <text x="82" y="30" fontSize="6">
+            ✨
+            <animate attributeName="opacity" values="0;1;0" dur="0.9s" repeatCount="indefinite" />
+          </text>
+          <text x="15" y="75" fontSize="7">
+            ✨
+            <animate attributeName="opacity" values="0;1;0" dur="1.5s" repeatCount="indefinite" />
+          </text>
+          <text x="78" y="80" fontSize="5">
+            ⭐
+            <animate attributeName="opacity" values="0;1;0" dur="1.1s" repeatCount="indefinite" />
+          </text>
+          {/* Motion lines */}
+          <line x1="10" y1="45" x2="5" y2="45" stroke="#888" strokeWidth="1" strokeLinecap="round">
+            <animate attributeName="opacity" values="0;0.5;0" dur="0.4s" repeatCount="indefinite" />
+          </line>
+          <line x1="90" y1="50" x2="95" y2="50" stroke="#888" strokeWidth="1" strokeLinecap="round">
+            <animate attributeName="opacity" values="0;0.5;0" dur="0.5s" repeatCount="indefinite" />
+          </line>
         </g>
       );
     case 'Sick':
       return (
         <g>
-          <text x="74" y="22" fontSize="14">
+          {/* Sweat drops */}
+          <ellipse cx="26" cy="28" rx="1.5" ry="2.5" fill="#5bc0eb" opacity="0.6">
+            <animate attributeName="cy" values="28;36;28" dur="1.5s" repeatCount="indefinite" />
+            <animate
+              attributeName="opacity"
+              values="0.6;0;0.6"
+              dur="1.5s"
+              repeatCount="indefinite"
+            />
+          </ellipse>
+          <ellipse cx="76" cy="32" rx="1.2" ry="2" fill="#5bc0eb" opacity="0.5">
+            <animate attributeName="cy" values="32;40;32" dur="1.8s" repeatCount="indefinite" />
+            <animate
+              attributeName="opacity"
+              values="0.5;0;0.5"
+              dur="1.8s"
+              repeatCount="indefinite"
+            />
+          </ellipse>
+          {/* Nausea swirl */}
+          <text x="74" y="22" fontSize="12">
             🤢
+            <animate
+              attributeName="opacity"
+              values="0.6;1;0.6"
+              dur="1.2s"
+              repeatCount="indefinite"
+            />
           </text>
+          {/* Dizzy spiral */}
+          <circle
+            cx="82"
+            cy="40"
+            r="4"
+            fill="none"
+            stroke="#9ca3af"
+            strokeWidth="0.8"
+            strokeDasharray="2 2"
+          >
+            <animateTransform
+              attributeName="transform"
+              type="rotate"
+              values="0 82 40;360 82 40"
+              dur="2s"
+              repeatCount="indefinite"
+            />
+          </circle>
         </g>
       );
     case 'Evolution':
       return (
         <g>
-          <text x="10" y="20" fontSize="10">
-            ✨
+          {/* Rainbow glow ring */}
+          <circle cx="50" cy="50" r="45" fill="none" strokeWidth="2">
+            <animate
+              attributeName="stroke"
+              values="#ff0000;#ff8800;#ffff00;#00ff00;#0088ff;#8800ff;#ff0000"
+              dur="2s"
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="opacity"
+              values="0.3;0.8;0.3"
+              dur="1s"
+              repeatCount="indefinite"
+            />
+            <animate attributeName="r" values="42;48;42" dur="1.5s" repeatCount="indefinite" />
+          </circle>
+          {/* Sparkle burst */}
+          <text x="5" y="15" fontSize="10">
+            ✨<animate attributeName="opacity" values="0;1;0" dur="0.6s" repeatCount="indefinite" />
           </text>
-          <text x="78" y="80" fontSize="10">
-            ✨
+          <text x="80" y="10" fontSize="12">
+            ⭐<animate attributeName="opacity" values="0;1;0" dur="0.8s" repeatCount="indefinite" />
           </text>
-          <text x="14" y="75" fontSize="8">
-            ⭐
+          <text x="85" y="85" fontSize="9">
+            ✨<animate attributeName="opacity" values="0;1;0" dur="0.7s" repeatCount="indefinite" />
           </text>
+          <text x="8" y="80" fontSize="11">
+            ⭐<animate attributeName="opacity" values="0;1;0" dur="0.9s" repeatCount="indefinite" />
+          </text>
+          {/* Rising particles */}
+          <circle cx="30" cy="90" r="2" fill="#fbbf24">
+            <animate attributeName="cy" values="90;10" dur="1.5s" repeatCount="indefinite" />
+            <animate attributeName="opacity" values="1;0" dur="1.5s" repeatCount="indefinite" />
+          </circle>
+          <circle cx="70" cy="85" r="1.5" fill="#f472b6">
+            <animate attributeName="cy" values="85;5" dur="1.8s" repeatCount="indefinite" />
+            <animate attributeName="opacity" values="1;0" dur="1.8s" repeatCount="indefinite" />
+          </circle>
+          <circle cx="50" cy="92" r="1.8" fill="#38bdf8">
+            <animate attributeName="cy" values="92;8" dur="1.3s" repeatCount="indefinite" />
+            <animate attributeName="opacity" values="1;0" dur="1.3s" repeatCount="indefinite" />
+          </circle>
+        </g>
+      );
+    case 'Dead':
+      return (
+        <g>
+          {/* Ghost rising */}
+          <g opacity="0.2">
+            <ellipse cx="50" cy="30" rx="12" ry="15" fill="white">
+              <animate attributeName="cy" values="30;15;30" dur="4s" repeatCount="indefinite" />
+              <animate
+                attributeName="opacity"
+                values="0.15;0.3;0.15"
+                dur="4s"
+                repeatCount="indefinite"
+              />
+            </ellipse>
+            <circle cx="46" cy="26" r="1.5" fill="#666">
+              <animate attributeName="cy" values="26;11;26" dur="4s" repeatCount="indefinite" />
+            </circle>
+            <circle cx="54" cy="26" r="1.5" fill="#666">
+              <animate attributeName="cy" values="26;11;26" dur="4s" repeatCount="indefinite" />
+            </circle>
+          </g>
+          {/* Halo */}
+          <ellipse
+            cx="50"
+            cy="5"
+            rx="10"
+            ry="3"
+            fill="none"
+            stroke="#fbbf24"
+            strokeWidth="1"
+            opacity="0.3"
+          >
+            <animate
+              attributeName="opacity"
+              values="0.2;0.4;0.2"
+              dur="3s"
+              repeatCount="indefinite"
+            />
+          </ellipse>
         </g>
       );
     default:
@@ -443,9 +886,143 @@ function renderStateOverlay(state: PetState): JSX.Element {
   }
 }
 
+// ─── Low-Stat Visual Indicators ─────────────────────────────────
+
+function renderStatIndicators(stats: PetStats | undefined, traits: PetTraits): JSX.Element {
+  if (!stats) return <></>;
+
+  return (
+    <g>
+      {/* Hungry: drool + rumbling belly */}
+      {stats.hunger < 30 && (
+        <g>
+          {/* Drool drop */}
+          <ellipse cx="53" cy="64" rx="1.5" ry="2" fill="white" opacity="0.7">
+            <animate attributeName="cy" values="64;72;64" dur="1.6s" repeatCount="indefinite" />
+            <animate
+              attributeName="opacity"
+              values="0.7;0;0.7"
+              dur="1.6s"
+              repeatCount="indefinite"
+            />
+          </ellipse>
+          {/* Thought bubble with food */}
+          <circle
+            cx="72"
+            cy="18"
+            r="8"
+            fill="white"
+            opacity="0.15"
+            stroke="#aaa"
+            strokeWidth="0.5"
+          />
+          <text x="72" y="21" textAnchor="middle" fontSize="8">
+            🍖
+          </text>
+          <circle cx="64" cy="28" r="2" fill="white" opacity="0.12" />
+          <circle cx="60" cy="33" r="1.2" fill="white" opacity="0.1" />
+        </g>
+      )}
+
+      {/* Dirty: stink lines + flies */}
+      {stats.cleanliness < 30 && (
+        <g>
+          {/* Wavy stink lines */}
+          <path
+            d="M30,8 Q33,4 36,8 Q39,12 42,8"
+            fill="none"
+            stroke="#8b9a46"
+            strokeWidth="0.8"
+            opacity="0.4"
+          >
+            <animate
+              attributeName="opacity"
+              values="0.2;0.5;0.2"
+              dur="1.5s"
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="d"
+              values="M30,8 Q33,4 36,8 Q39,12 42,8;M30,6 Q33,10 36,6 Q39,2 42,6;M30,8 Q33,4 36,8 Q39,12 42,8"
+              dur="1.5s"
+              repeatCount="indefinite"
+            />
+          </path>
+          <path
+            d="M55,5 Q58,1 61,5 Q64,9 67,5"
+            fill="none"
+            stroke="#8b9a46"
+            strokeWidth="0.8"
+            opacity="0.3"
+          >
+            <animate
+              attributeName="opacity"
+              values="0.15;0.4;0.15"
+              dur="1.8s"
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="d"
+              values="M55,5 Q58,1 61,5 Q64,9 67,5;M55,3 Q58,7 61,3 Q64,-1 67,3;M55,5 Q58,1 61,5 Q64,9 67,5"
+              dur="1.8s"
+              repeatCount="indefinite"
+            />
+          </path>
+          {/* Orbiting fly */}
+          <g>
+            <text x="0" y="0" fontSize="6">
+              🪰
+            </text>
+            <animateTransform
+              attributeName="transform"
+              type="rotate"
+              values="0 50 25;360 50 25"
+              dur="3s"
+              repeatCount="indefinite"
+            />
+            <animateMotion
+              path="M-25,-20 A25,20 0 1,1 25,20 A25,20 0 1,1 -25,-20"
+              dur="3s"
+              repeatCount="indefinite"
+            />
+          </g>
+        </g>
+      )}
+
+      {/* Low health: green pallor + dizzy */}
+      {stats.health < 30 && (
+        <g>
+          <rect x="15" y="14" width="70" height="76" rx="20" fill="#4ade80" opacity="0.08">
+            <animate
+              attributeName="opacity"
+              values="0.04;0.12;0.04"
+              dur="2s"
+              repeatCount="indefinite"
+            />
+          </rect>
+          {/* Dizzy stars */}
+          <text x="18" y="18" fontSize="6" opacity="0.5">
+            💫
+            <animateTransform
+              attributeName="transform"
+              type="rotate"
+              values="0 22 15;360 22 15"
+              dur="2s"
+              repeatCount="indefinite"
+            />
+          </text>
+        </g>
+      )}
+    </g>
+  );
+}
+
 // ─── Blush (appears when happiness > 80) ────────────────────────
 
-function renderCheeks(traits: PetTraits): JSX.Element {
+function renderCheeks(traits: PetTraits, stats?: PetStats): JSX.Element {
+  // Only show blush when happiness is high
+  if (stats && stats.happiness <= 80) return <></>;
+
   return (
     <g opacity="0.25">
       <ellipse cx={50 - 12 * traits.eyeSpacing - 2} cy="52" rx="5" ry="3" fill="hsl(0, 70%, 65%)" />
@@ -454,16 +1031,53 @@ function renderCheeks(traits: PetTraits): JSX.Element {
   );
 }
 
+// ─── SVG CSS Animations ─────────────────────────────────────────
+
+function svgStyles(): JSX.Element {
+  return (
+    <defs>
+      <style>{`
+        .pet-blink {
+          animation: blink 4s ease-in-out infinite;
+        }
+        @keyframes blink {
+          0%, 42% { transform: scaleY(1); transform-origin: 50% 42px; }
+          45% { transform: scaleY(0.05); transform-origin: 50% 42px; }
+          48%, 100% { transform: scaleY(1); transform-origin: 50% 42px; }
+        }
+        .pet-action-flash {
+          animation: action-flash 0.3s ease-out;
+        }
+        @keyframes action-flash {
+          0% { filter: brightness(1); }
+          50% { filter: brightness(1.5); }
+          100% { filter: brightness(1); }
+        }
+      `}</style>
+    </defs>
+  );
+}
+
 // ─── Main Component ─────────────────────────────────────────────
 
-export function PetSprite({ petId, state, name, level }: PetSpriteProps) {
+export function PetSprite({ petId, state, name, level, stats, activeAction }: PetSpriteProps) {
   const traits = useMemo(() => deriveTraits(petId), [petId]);
-  const animation = useMemo(() => getStateAnimation(state, traits), [state, traits]);
+  const animation = useMemo(
+    () => getStateAnimation(state, traits, activeAction),
+    [state, traits, activeAction],
+  );
   const scale = traits.sizeModifier;
+
+  // Determine effective display state for face/mouth rendering
+  const displayState: PetState = activeAction
+    ? (actionToDisplayState(activeAction) ?? state)
+    : state;
+  // Animation key: change when state OR activeAction changes to reset Framer Motion
+  const animKey = activeAction ? `action-${activeAction}` : state;
 
   return (
     <div className="flex flex-col items-center gap-4">
-      <motion.div animate={animation} key={state} className="select-none">
+      <motion.div animate={animation} key={animKey} className="select-none">
         <svg
           width={120 * scale}
           height={120 * scale}
@@ -471,6 +1085,9 @@ export function PetSprite({ petId, state, name, level }: PetSpriteProps) {
           xmlns="http://www.w3.org/2000/svg"
           style={{ overflow: 'visible' }}
         >
+          {/* SVG animations CSS */}
+          {svgStyles()}
+
           {/* Ears (behind body) */}
           {renderEars(traits)}
 
@@ -484,19 +1101,30 @@ export function PetSprite({ petId, state, name, level }: PetSpriteProps) {
           <g clipPath={`url(#body-clip-${petId.slice(0, 8)})`}>{renderPattern(traits)}</g>
 
           {/* Face */}
-          {renderEyes(traits, state)}
-          {renderMouth(traits, state)}
-          {renderCheeks(traits)}
+          {renderEyes(traits, displayState, stats)}
+          {renderMouth(traits, displayState)}
+          {renderCheeks(traits, stats)}
 
           {/* Accessory */}
           {renderAccessory(traits, level)}
 
+          {/* Low-stat visual indicators */}
+          {renderStatIndicators(stats, traits)}
+
           {/* State overlay effects */}
-          {renderStateOverlay(state)}
+          {renderStateOverlay(state, activeAction)}
         </svg>
       </motion.div>
       <p className="text-neogochi-muted text-xs">{name}</p>
-      <p className="text-neogochi-accent text-[10px] uppercase tracking-wider">{state}</p>
+      <p className="text-neogochi-accent text-[10px] uppercase tracking-wider">
+        {activeAction
+          ? activeAction === 'feed'
+            ? 'Eating'
+            : activeAction === 'play'
+              ? 'Playing'
+              : 'Cleaning'
+          : state}
+      </p>
     </div>
   );
 }
