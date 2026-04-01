@@ -43,7 +43,7 @@ export default function LivingRoomPage() {
 
       {/* Pet Sprite */}
       <div className="flex-1 flex items-center justify-center py-8">
-        <PetSprite state={pet.currentState} name={pet.name} />
+        <PetSprite petId={pet.id} state={pet.currentState} name={pet.name} level={pet.level} />
       </div>
 
       {/* Vibe Chat */}
