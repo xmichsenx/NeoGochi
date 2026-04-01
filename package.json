@@ -1,9 +1,10 @@
 {
   "name": "neogochi",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "private": true,
   "description": "Real-Time AI Tamagotchi — NeoGochi",
   "scripts": {
+    "dev": "docker compose up -d && pnpm --filter shared build && concurrently -n backend,frontend -c blue,magenta \"pnpm dev:backend\" \"pnpm dev:frontend\"",
     "dev:backend": "pnpm --filter backend dev",
     "dev:frontend": "pnpm --filter frontend dev",
     "build": "pnpm -r build",
@@ -12,13 +13,16 @@
     "test:frontend": "pnpm --filter frontend test",
     "test:e2e": "playwright test",
     "lint": "pnpm -r lint",
-    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\""
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "services:up": "docker compose up -d",
+    "services:down": "docker compose down"
   },
   "engines": {
     "node": ">=20.0.0",
     "pnpm": ">=9.0.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.1"
+    "@playwright/test": "^1.59.1",
+    "concurrently": "^9.2.1"
   }
 }
