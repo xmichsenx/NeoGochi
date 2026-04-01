@@ -10,11 +10,15 @@
     "test": "pnpm -r test",
     "test:backend": "pnpm --filter backend test",
     "test:frontend": "pnpm --filter frontend test",
+    "test:e2e": "playwright test",
     "lint": "pnpm -r lint",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\""
   },
   "engines": {
     "node": ">=20.0.0",
     "pnpm": ">=9.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
   }
 }

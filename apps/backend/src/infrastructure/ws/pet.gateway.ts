@@ -40,6 +40,24 @@ export class PetGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly socketToSession = new Map<string, string>();
   private readonly sessionToSocket = new Map<string, string>();
 
+  // Rate limiting: sessionId → Map<action, lastExecutedTimestamp>
+  private readonly actionCooldowns = new Map<string, Map<string, number>>();
+
+  // Cooldown durations in ms per action
+  private readonly COOLDOWN_MS: Record<string, number> = {
+    feed: 3000,
+    play: 3000,
+    sleep: 5000,
+    wakeUp: 1000,
+    clean: 3000,
+    heal: 5000,
+  };
+
+  // Global rate limit: max actions per window
+  private readonly RATE_LIMIT_WINDOW_MS = 10_000;
+  private readonly RATE_LIMIT_MAX_ACTIONS = 10;
+  private readonly actionTimestamps = new Map<string, number[]>();
+
   constructor(
     private readonly commandBus: CommandBus,
     private readonly queryBus: QueryBus,
@@ -63,6 +81,8 @@ export class PetGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const sessionId = this.socketToSession.get(client.id);
     if (sessionId) {
       this.sessionToSocket.delete(sessionId);
+      this.actionCooldowns.delete(sessionId);
+      this.actionTimestamps.delete(sessionId);
     }
     this.socketToSession.delete(client.id);
   }
@@ -91,43 +111,80 @@ export class PetGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage(WS_EVENTS.FEED)
   async handleFeed(@ConnectedSocket() client: Socket) {
-    await this.executeActionForClient(client, (sessionId) => new FeedCommand(sessionId));
+    await this.executeActionForClient(client, (sessionId) => new FeedCommand(sessionId), 'feed');
   }
 
   @SubscribeMessage(WS_EVENTS.PLAY)
   async handlePlay(@ConnectedSocket() client: Socket) {
-    await this.executeActionForClient(client, (sessionId) => new PlayCommand(sessionId));
+    await this.executeActionForClient(client, (sessionId) => new PlayCommand(sessionId), 'play');
   }
 
   @SubscribeMessage(WS_EVENTS.SLEEP)
   async handleSleep(@ConnectedSocket() client: Socket) {
-    await this.executeActionForClient(client, (sessionId) => new SleepCommand(sessionId));
+    await this.executeActionForClient(client, (sessionId) => new SleepCommand(sessionId), 'sleep');
   }
 
   @SubscribeMessage(WS_EVENTS.WAKE_UP)
   async handleWakeUp(@ConnectedSocket() client: Socket) {
-    await this.executeActionForClient(client, (sessionId) => new WakeUpCommand(sessionId));
+    await this.executeActionForClient(
+      client,
+      (sessionId) => new WakeUpCommand(sessionId),
+      'wakeUp',
+    );
   }
 
   @SubscribeMessage(WS_EVENTS.CLEAN)
   async handleClean(@ConnectedSocket() client: Socket) {
-    await this.executeActionForClient(client, (sessionId) => new CleanCommand(sessionId));
+    await this.executeActionForClient(client, (sessionId) => new CleanCommand(sessionId), 'clean');
   }
 
   @SubscribeMessage(WS_EVENTS.HEAL)
   async handleHeal(@ConnectedSocket() client: Socket) {
-    await this.executeActionForClient(client, (sessionId) => new HealCommand(sessionId));
+    await this.executeActionForClient(client, (sessionId) => new HealCommand(sessionId), 'heal');
   }
 
   private async executeActionForClient(
     client: Socket,
     commandFactory: (sessionId: string) => object,
+    actionName?: string,
   ) {
     const sessionId = this.socketToSession.get(client.id);
     if (!sessionId) {
       client.emit(WS_EVENTS.ERROR, { message: 'No pet associated with this session' });
       return;
     }
+
+    const now = Date.now();
+
+    // Global rate limit check
+    const timestamps = this.actionTimestamps.get(sessionId) ?? [];
+    const recentTimestamps = timestamps.filter((t) => now - t < this.RATE_LIMIT_WINDOW_MS);
+    if (recentTimestamps.length >= this.RATE_LIMIT_MAX_ACTIONS) {
+      client.emit(WS_EVENTS.ERROR, { message: 'Too many actions. Please slow down.' });
+      return;
+    }
+
+    // Per-action cooldown check
+    if (actionName) {
+      const cooldowns = this.actionCooldowns.get(sessionId) ?? new Map<string, number>();
+      const lastUsed = cooldowns.get(actionName) ?? 0;
+      const cooldownMs = this.COOLDOWN_MS[actionName] ?? 0;
+
+      if (now - lastUsed < cooldownMs) {
+        const remaining = Math.ceil((cooldownMs - (now - lastUsed)) / 1000);
+        client.emit(WS_EVENTS.ERROR, {
+          message: `${actionName} is on cooldown. Wait ${remaining}s.`,
+        });
+        return;
+      }
+
+      cooldowns.set(actionName, now);
+      this.actionCooldowns.set(sessionId, cooldowns);
+    }
+
+    // Track for global rate limit
+    recentTimestamps.push(now);
+    this.actionTimestamps.set(sessionId, recentTimestamps);
 
     try {
       await this.commandBus.execute(commandFactory(sessionId));
