@@ -1,0 +1,76 @@
+{
+  "id": "ed596171-39eb-44d5-83a5-1536b43919c4",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.graveyard": {
+      "name": "graveyard",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(30)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "starting_class": {
+          "name": "starting_class",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "final_level": {
+          "name": "final_level",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "days_survived": {
+          "name": "days_survived",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cause_of_death": {
+          "name": "cause_of_death",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stats_snapshot": {
+          "name": "stats_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "died_at": {
+          "name": "died_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
