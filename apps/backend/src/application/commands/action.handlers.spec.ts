@@ -16,7 +16,7 @@ import {
   HealCommand,
 } from './action.commands';
 import { PetStatePort } from '../ports/pet-state.port';
-import { EventBus } from '@nestjs/cqrs';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Pet } from '../../domain/pet.entity';
 import { StatChangedEvent } from '../events/stat-changed.event';
 import { StateTransitionEvent } from '../events/state-transition.event';
@@ -38,7 +38,7 @@ function createMockPet(overrides?: { currentState?: string }): Pet {
 
 describe('Action Handlers', () => {
   let petStatePort: PetStatePort;
-  let eventBus: EventBus;
+  let eventEmitter: EventEmitter2;
 
   beforeEach(() => {
     petStatePort = {
@@ -46,7 +46,7 @@ describe('Action Handlers', () => {
       findBySessionId: vi.fn(),
       delete: vi.fn().mockResolvedValue(undefined),
     };
-    eventBus = { publish: vi.fn() } as unknown as EventBus;
+    eventEmitter = { emit: vi.fn() } as unknown as EventEmitter2;
   });
 
   describe('FeedHandler', () => {
@@ -55,17 +55,17 @@ describe('Action Handlers', () => {
       const initialHunger = pet.stats.hunger;
       (petStatePort.findBySessionId as ReturnType<typeof vi.fn>).mockResolvedValue(pet);
 
-      const handler = new FeedHandler(petStatePort, eventBus);
+      const handler = new FeedHandler(petStatePort, eventEmitter);
       const result = await handler.execute(new FeedCommand(SESSION_ID));
 
       expect(result.stats.hunger).toBeGreaterThan(initialHunger);
       expect(petStatePort.save).toHaveBeenCalledOnce();
-      expect(eventBus.publish).toHaveBeenCalled();
+      expect(eventEmitter.emit).toHaveBeenCalled();
     });
 
     it('should throw if pet not found', async () => {
       (petStatePort.findBySessionId as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-      const handler = new FeedHandler(petStatePort, eventBus);
+      const handler = new FeedHandler(petStatePort, eventEmitter);
 
       await expect(handler.execute(new FeedCommand(SESSION_ID))).rejects.toThrow('Pet not found');
     });
@@ -74,21 +74,23 @@ describe('Action Handlers', () => {
       const pet = createMockPet({ currentState: 'Sleeping' });
       (petStatePort.findBySessionId as ReturnType<typeof vi.fn>).mockResolvedValue(pet);
 
-      const handler = new FeedHandler(petStatePort, eventBus);
+      const handler = new FeedHandler(petStatePort, eventEmitter);
       await expect(handler.execute(new FeedCommand(SESSION_ID))).rejects.toThrow(
         'Cannot feed in current state',
       );
     });
 
-    it('should publish StatChangedEvent after feeding', async () => {
+    it('should emit stat.changed event after feeding', async () => {
       const pet = createMockPet();
       (petStatePort.findBySessionId as ReturnType<typeof vi.fn>).mockResolvedValue(pet);
 
-      const handler = new FeedHandler(petStatePort, eventBus);
+      const handler = new FeedHandler(petStatePort, eventEmitter);
       await handler.execute(new FeedCommand(SESSION_ID));
 
-      const events = (eventBus.publish as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
-      expect(events.some((e) => e instanceof StatChangedEvent)).toBe(true);
+      const calls = (eventEmitter.emit as ReturnType<typeof vi.fn>).mock.calls;
+      expect(
+        calls.some(([name, e]) => name === 'stat.changed' && e instanceof StatChangedEvent),
+      ).toBe(true);
     });
   });
 
@@ -99,7 +101,7 @@ describe('Action Handlers', () => {
       const initialEnergy = pet.stats.energy;
       (petStatePort.findBySessionId as ReturnType<typeof vi.fn>).mockResolvedValue(pet);
 
-      const handler = new PlayHandler(petStatePort, eventBus);
+      const handler = new PlayHandler(petStatePort, eventEmitter);
       await handler.execute(new PlayCommand(SESSION_ID));
 
       expect(pet.stats.happiness).toBeGreaterThan(initialHappiness);
@@ -110,7 +112,7 @@ describe('Action Handlers', () => {
       const pet = createMockPet({ currentState: 'Dead' });
       (petStatePort.findBySessionId as ReturnType<typeof vi.fn>).mockResolvedValue(pet);
 
-      const handler = new PlayHandler(petStatePort, eventBus);
+      const handler = new PlayHandler(petStatePort, eventEmitter);
       await expect(handler.execute(new PlayCommand(SESSION_ID))).rejects.toThrow();
     });
   });
@@ -120,21 +122,23 @@ describe('Action Handlers', () => {
       const pet = createMockPet();
       (petStatePort.findBySessionId as ReturnType<typeof vi.fn>).mockResolvedValue(pet);
 
-      const handler = new SleepHandler(petStatePort, eventBus);
+      const handler = new SleepHandler(petStatePort, eventEmitter);
       await handler.execute(new SleepCommand(SESSION_ID));
 
       expect(pet.currentState).toBe('Sleeping');
     });
 
-    it('should publish StateTransitionEvent on state change', async () => {
+    it('should emit state.transition event on state change', async () => {
       const pet = createMockPet();
       (petStatePort.findBySessionId as ReturnType<typeof vi.fn>).mockResolvedValue(pet);
 
-      const handler = new SleepHandler(petStatePort, eventBus);
+      const handler = new SleepHandler(petStatePort, eventEmitter);
       await handler.execute(new SleepCommand(SESSION_ID));
 
-      const events = (eventBus.publish as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
-      expect(events.some((e) => e instanceof StateTransitionEvent)).toBe(true);
+      const calls = (eventEmitter.emit as ReturnType<typeof vi.fn>).mock.calls;
+      expect(
+        calls.some(([name, e]) => name === 'state.transition' && e instanceof StateTransitionEvent),
+      ).toBe(true);
     });
   });
 
@@ -143,7 +147,7 @@ describe('Action Handlers', () => {
       const pet = createMockPet({ currentState: 'Sleeping' });
       (petStatePort.findBySessionId as ReturnType<typeof vi.fn>).mockResolvedValue(pet);
 
-      const handler = new WakeUpHandler(petStatePort, eventBus);
+      const handler = new WakeUpHandler(petStatePort, eventEmitter);
       await handler.execute(new WakeUpCommand(SESSION_ID));
 
       expect(pet.currentState).toBe('Idle');
@@ -153,7 +157,7 @@ describe('Action Handlers', () => {
       const pet = createMockPet({ currentState: 'Idle' });
       (petStatePort.findBySessionId as ReturnType<typeof vi.fn>).mockResolvedValue(pet);
 
-      const handler = new WakeUpHandler(petStatePort, eventBus);
+      const handler = new WakeUpHandler(petStatePort, eventEmitter);
       await expect(handler.execute(new WakeUpCommand(SESSION_ID))).rejects.toThrow();
     });
   });
@@ -164,7 +168,7 @@ describe('Action Handlers', () => {
       const initialCleanliness = pet.stats.cleanliness;
       (petStatePort.findBySessionId as ReturnType<typeof vi.fn>).mockResolvedValue(pet);
 
-      const handler = new CleanHandler(petStatePort, eventBus);
+      const handler = new CleanHandler(petStatePort, eventEmitter);
       await handler.execute(new CleanCommand(SESSION_ID));
 
       expect(pet.stats.cleanliness).toBeGreaterThan(initialCleanliness);
@@ -174,7 +178,7 @@ describe('Action Handlers', () => {
       const pet = createMockPet({ currentState: 'Sick' });
       (petStatePort.findBySessionId as ReturnType<typeof vi.fn>).mockResolvedValue(pet);
 
-      const handler = new CleanHandler(petStatePort, eventBus);
+      const handler = new CleanHandler(petStatePort, eventEmitter);
       await expect(handler.execute(new CleanCommand(SESSION_ID))).resolves.toBeDefined();
     });
   });
@@ -185,7 +189,7 @@ describe('Action Handlers', () => {
       const initialHealth = pet.stats.health;
       (petStatePort.findBySessionId as ReturnType<typeof vi.fn>).mockResolvedValue(pet);
 
-      const handler = new HealHandler(petStatePort, eventBus);
+      const handler = new HealHandler(petStatePort, eventEmitter);
       await handler.execute(new HealCommand(SESSION_ID));
 
       expect(pet.currentState).toBe('Idle');
@@ -196,7 +200,7 @@ describe('Action Handlers', () => {
       const pet = createMockPet({ currentState: 'Idle' });
       (petStatePort.findBySessionId as ReturnType<typeof vi.fn>).mockResolvedValue(pet);
 
-      const handler = new HealHandler(petStatePort, eventBus);
+      const handler = new HealHandler(petStatePort, eventEmitter);
       await expect(handler.execute(new HealCommand(SESSION_ID))).rejects.toThrow();
     });
   });

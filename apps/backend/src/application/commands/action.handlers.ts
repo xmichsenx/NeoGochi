@@ -1,5 +1,6 @@
-import { CommandHandler, ICommandHandler, EventBus } from '@nestjs/cqrs';
+import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { Inject } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PET_STATE_PORT, PetStatePort } from '../ports/pet-state.port';
 import {
   FeedCommand,
@@ -17,7 +18,7 @@ import { PetState } from '@neogochi/shared';
 abstract class BaseActionHandler {
   constructor(
     @Inject(PET_STATE_PORT) protected readonly petStatePort: PetStatePort,
-    protected readonly eventBus: EventBus,
+    protected readonly eventEmitter: EventEmitter2,
   ) {}
 
   protected async executeAction(
@@ -33,10 +34,11 @@ abstract class BaseActionHandler {
     if (result === null) throw new Error(`Cannot ${action} in current state: ${pet.currentState}`);
 
     await this.petStatePort.save(pet);
-    this.eventBus.publish(new StatChangedEvent(sessionId, pet.toPlain()));
+    this.eventEmitter.emit('stat.changed', new StatChangedEvent(sessionId, pet.toPlain()));
 
     if (previousState !== pet.currentState) {
-      this.eventBus.publish(
+      this.eventEmitter.emit(
+        'state.transition',
         new StateTransitionEvent(sessionId, pet.id, previousState, pet.currentState),
       );
     }

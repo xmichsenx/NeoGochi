@@ -1,5 +1,6 @@
-import { CommandHandler, ICommandHandler, EventBus } from '@nestjs/cqrs';
+import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { Inject } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { v4 as uuidv4 } from 'uuid';
 import { Pet } from '../../domain/pet.entity';
 import { CreatePetCommand } from './create-pet.command';
@@ -12,14 +13,14 @@ export class CreatePetHandler implements ICommandHandler<CreatePetCommand> {
   constructor(
     @Inject(PET_STATE_PORT) private readonly petStatePort: PetStatePort,
     @Inject(TICK_SCHEDULER_PORT) private readonly tickScheduler: TickSchedulerPort,
-    private readonly eventBus: EventBus,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async execute(command: CreatePetCommand): Promise<Pet> {
     const pet = Pet.create(uuidv4(), command.name, command.startingClass);
     await this.petStatePort.save(pet);
     await this.tickScheduler.scheduleTickJob(command.sessionId);
-    this.eventBus.publish(new PetCreatedEvent(command.sessionId, pet.toPlain()));
+    this.eventEmitter.emit('pet.created', new PetCreatedEvent(command.sessionId, pet.toPlain()));
     return pet;
   }
 }

@@ -1,7 +1,5 @@
 'use client';
 
-import { motion } from 'framer-motion';
-
 interface StatBarProps {
   label: string;
   value: number;
@@ -18,7 +16,7 @@ export function StatBar({ label, value, color }: StatBarProps) {
       <div className="relative w-16 h-16">
         <svg className="w-16 h-16 -rotate-90" viewBox="0 0 64 64">
           <circle cx="32" cy="32" r={radius} fill="none" stroke="#1a1a2e" strokeWidth="4" />
-          <motion.circle
+          <circle
             cx="32"
             cy="32"
             r={radius}
@@ -27,8 +25,8 @@ export function StatBar({ label, value, color }: StatBarProps) {
             strokeWidth="4"
             strokeLinecap="round"
             strokeDasharray={circumference}
-            animate={{ strokeDashoffset: offset }}
-            transition={{ duration: 0.5, ease: 'easeOut' }}
+            strokeDashoffset={offset}
+            style={{ transition: 'stroke-dashoffset 0.5s ease-out' }}
           />
         </svg>
         <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold">

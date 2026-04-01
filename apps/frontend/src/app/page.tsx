@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
@@ -22,8 +22,13 @@ export default function HatcheryPage() {
   const pet = usePetState((s) => s.pet);
 
   // Redirect if pet already exists
+  useEffect(() => {
+    if (pet) {
+      router.push('/pet');
+    }
+  }, [pet, router]);
+
   if (pet) {
-    router.push('/pet');
     return null;
   }
 

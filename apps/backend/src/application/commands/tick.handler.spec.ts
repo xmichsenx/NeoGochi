@@ -4,7 +4,7 @@ import { TickCommand } from './tick.command';
 import { PetStatePort } from '../ports/pet-state.port';
 import { PetGraveyardPort } from '../ports/pet-graveyard.port';
 import { TickSchedulerPort } from '../ports/tick-scheduler.port';
-import { EventBus } from '@nestjs/cqrs';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
 import { Pet } from '../../domain/pet.entity';
 import { StatChangedEvent } from '../events/stat-changed.event';
@@ -48,7 +48,7 @@ describe('TickHandler', () => {
   let petStatePort: PetStatePort;
   let graveyardPort: PetGraveyardPort;
   let tickScheduler: TickSchedulerPort;
-  let eventBus: EventBus;
+  let eventEmitter: EventEmitter2;
   let configService: ConfigService;
 
   beforeEach(() => {
@@ -68,13 +68,19 @@ describe('TickHandler', () => {
       removeTickJob: vi.fn().mockResolvedValue(undefined),
     };
 
-    eventBus = { publish: vi.fn() } as unknown as EventBus;
+    eventEmitter = { emit: vi.fn() } as unknown as EventEmitter2;
 
     configService = {
       get: vi.fn((key: string, defaultValue: number) => defaultValue),
     } as unknown as ConfigService;
 
-    handler = new TickHandler(petStatePort, graveyardPort, tickScheduler, eventBus, configService);
+    handler = new TickHandler(
+      petStatePort,
+      graveyardPort,
+      tickScheduler,
+      eventEmitter,
+      configService,
+    );
   });
 
   it('should do nothing if pet not found', async () => {
@@ -83,7 +89,7 @@ describe('TickHandler', () => {
     await handler.execute(new TickCommand(SESSION_ID));
 
     expect(petStatePort.save).not.toHaveBeenCalled();
-    expect(eventBus.publish).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
   });
 
   it('should decay stats on tick', async () => {
@@ -95,17 +101,19 @@ describe('TickHandler', () => {
 
     expect(pet.stats.hunger).toBeLessThan(initialHunger);
     expect(petStatePort.save).toHaveBeenCalledOnce();
-    expect(eventBus.publish).toHaveBeenCalled();
+    expect(eventEmitter.emit).toHaveBeenCalled();
   });
 
-  it('should publish StatChangedEvent on tick', async () => {
+  it('should emit stat.changed event on tick', async () => {
     const pet = createMockPet();
     (petStatePort.findBySessionId as ReturnType<typeof vi.fn>).mockResolvedValue(pet);
 
     await handler.execute(new TickCommand(SESSION_ID));
 
-    const events = (eventBus.publish as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
-    expect(events.some((e) => e instanceof StatChangedEvent)).toBe(true);
+    const calls = (eventEmitter.emit as ReturnType<typeof vi.fn>).mock.calls;
+    expect(
+      calls.some(([name, e]) => name === 'stat.changed' && e instanceof StatChangedEvent),
+    ).toBe(true);
   });
 
   it('should kill pet when health reaches 0', async () => {
@@ -118,8 +126,8 @@ describe('TickHandler', () => {
     expect(petStatePort.delete).toHaveBeenCalledWith(SESSION_ID);
     expect(tickScheduler.removeTickJob).toHaveBeenCalledWith(SESSION_ID);
 
-    const events = (eventBus.publish as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
-    expect(events.some((e) => e instanceof PetDiedEvent)).toBe(true);
+    const calls = (eventEmitter.emit as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.some(([name, e]) => name === 'pet.died' && e instanceof PetDiedEvent)).toBe(true);
   });
 
   it('should not save pet to state port when it dies', async () => {

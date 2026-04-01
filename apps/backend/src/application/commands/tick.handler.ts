@@ -1,5 +1,6 @@
-import { CommandHandler, ICommandHandler, EventBus } from '@nestjs/cqrs';
+import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { Inject } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ConfigService } from '@nestjs/config';
 import { TickCommand } from './tick.command';
 import { PET_STATE_PORT, PetStatePort } from '../ports/pet-state.port';
@@ -16,7 +17,7 @@ export class TickHandler implements ICommandHandler<TickCommand> {
     @Inject(PET_STATE_PORT) private readonly petStatePort: PetStatePort,
     @Inject(PET_GRAVEYARD_PORT) private readonly graveyardPort: PetGraveyardPort,
     @Inject(TICK_SCHEDULER_PORT) private readonly tickScheduler: TickSchedulerPort,
-    private readonly eventBus: EventBus,
+    private readonly eventEmitter: EventEmitter2,
     private readonly configService: ConfigService,
   ) {}
 
@@ -40,23 +41,26 @@ export class TickHandler implements ICommandHandler<TickCommand> {
       await this.graveyardPort.bury(pet, causeOfDeath);
       await this.petStatePort.delete(command.sessionId);
       await this.tickScheduler.removeTickJob(command.sessionId);
-      this.eventBus.publish(
+      this.eventEmitter.emit(
+        'pet.died',
         new PetDiedEvent(command.sessionId, pet.id, pet.name, pet.level, causeOfDeath),
       );
       return;
     }
 
     await this.petStatePort.save(pet);
-    this.eventBus.publish(new StatChangedEvent(command.sessionId, pet.toPlain()));
+    this.eventEmitter.emit('stat.changed', new StatChangedEvent(command.sessionId, pet.toPlain()));
 
     if (result.previousState !== pet.currentState) {
-      this.eventBus.publish(
+      this.eventEmitter.emit(
+        'state.transition',
         new StateTransitionEvent(command.sessionId, pet.id, result.previousState, pet.currentState),
       );
     }
 
     if (result.evolved) {
-      this.eventBus.publish(
+      this.eventEmitter.emit(
+        'pet.evolved',
         new PetEvolvedEvent(command.sessionId, pet.id, pet.level, previousLevel),
       );
     }

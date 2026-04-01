@@ -3,14 +3,14 @@ import { CreatePetHandler } from './create-pet.handler';
 import { CreatePetCommand } from './create-pet.command';
 import { PetStatePort } from '../ports/pet-state.port';
 import { TickSchedulerPort } from '../ports/tick-scheduler.port';
-import { EventBus } from '@nestjs/cqrs';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PetCreatedEvent } from '../events/pet-created.event';
 
 describe('CreatePetHandler', () => {
   let handler: CreatePetHandler;
   let petStatePort: PetStatePort;
   let tickScheduler: TickSchedulerPort;
-  let eventBus: EventBus;
+  let eventEmitter: EventEmitter2;
 
   beforeEach(() => {
     petStatePort = {
@@ -24,9 +24,9 @@ describe('CreatePetHandler', () => {
       removeTickJob: vi.fn().mockResolvedValue(undefined),
     };
 
-    eventBus = { publish: vi.fn() } as unknown as EventBus;
+    eventEmitter = { emit: vi.fn() } as unknown as EventEmitter2;
 
-    handler = new CreatePetHandler(petStatePort, tickScheduler, eventBus);
+    handler = new CreatePetHandler(petStatePort, tickScheduler, eventEmitter);
   });
 
   it('should create a pet and save it', async () => {
@@ -46,12 +46,13 @@ describe('CreatePetHandler', () => {
     expect(tickScheduler.scheduleTickJob).toHaveBeenCalledWith('session-1');
   });
 
-  it('should publish a PetCreatedEvent', async () => {
+  it('should emit a pet.created event', async () => {
     const command = new CreatePetCommand('session-1', 'Luna', 'Chill');
     const pet = await handler.execute(command);
 
-    expect(eventBus.publish).toHaveBeenCalledOnce();
-    const event = (eventBus.publish as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(eventEmitter.emit).toHaveBeenCalledOnce();
+    const [eventName, event] = (eventEmitter.emit as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(eventName).toBe('pet.created');
     expect(event).toBeInstanceOf(PetCreatedEvent);
     expect(event.sessionId).toBe('session-1');
     expect(event.pet.name).toBe('Luna');
